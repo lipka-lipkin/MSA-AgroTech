@@ -1,0 +1,41 @@
+@startuml C3_B_video
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title АгроТех Х — C4 C3 — Вариант B · Сервис видеоаналитики на сервере фермы
+
+LAYOUT_TOP_DOWN()
+
+System_Ext(cameras, "IP-камеры", "Все камеры фермы, RTSP")
+Container(broker, "Брокер сообщений", "RabbitMQ", "Передаёт события сервису инцидентов")
+Container(incident, "Сервис инцидентов и оповещений", "Go", "Запрашивает видеоклипы событий")
+ContainerDb(farm_db, "БД фермы", "PostgreSQL", "Список камер, зоны, пороги")
+
+Container_Boundary(video, "Сервис видеоаналитики (Python, GPU)") {
+    Component(manager, "Менеджер камер", "Python", "Подключает все камеры, переподключает при обрыве")
+    Component(capture, "Захват видео", "GStreamer", "Получает кадры с камер")
+    Component(inference, "Анализ кадров на GPU", "Модель партнёра, TensorRT", "Обрабатывает кадры с нескольких камер пачками")
+    Component(detector, "Детектор событий", "Python", "Проверяет правила: порог уверенности, длительность, зона. Формирует событие")
+    Component(archive, "Видеоархив", "Диск сервера", "Хранит видео за 72 ч, вырезает клип события")
+    Component(publisher, "Публикатор событий", "AMQP-клиент", "Отправляет события в брокер")
+    Component(health, "Контроль работы", "Python", "Проверяет, что каждая камера анализируется; если нет — отправляет событие «камера не анализируется»")
+    Component(config, "Настройки", "Python", "Загружает камеры, зоны и пороги из БД")
+    Component(clip_api, "API клипов", "HTTP (FastAPI)", "Отдаёт клип события по запросу")
+}
+
+Rel(config, farm_db, "Камеры и правила", "SQL")
+Rel(config, manager, "Список камер")
+Rel(config, detector, "Зоны и пороги")
+Rel(manager, capture, "Запуск и перезапуск потоков")
+Rel(cameras, capture, "Видео", "RTSP")
+Rel(capture, inference, "Кадры")
+Rel(capture, archive, "Запись видео")
+Rel(inference, detector, "Результаты анализа")
+Rel(detector, publisher, "Событие")
+Rel(publisher, broker, "События", "AMQP")
+Rel(health, capture, "Проверяет поток кадров")
+Rel(health, publisher, "Камера не анализируется")
+Rel(incident, clip_api, "Запрос клипа", "HTTP")
+Rel(clip_api, archive, "Читает клип")
+
+SHOW_LEGEND()
+@enduml

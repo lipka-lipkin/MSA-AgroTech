@@ -1,0 +1,40 @@
+@startuml C3_A_edge
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title АгроТех Х — C4 C3 — Вариант A · ПО edge-устройства
+
+LAYOUT_TOP_DOWN()
+
+System_Ext(cameras, "IP-камеры", "4–8 камер секции, RTSP")
+Container(broker, "Брокер сообщений", "RabbitMQ + MQTT, сервер фермы", "Передаёт события сервису инцидентов")
+System_Ext(gsm, "GSM-шлюз и сирены", "SMS, звонки, сирена")
+Container(incident, "Сервис инцидентов и оповещений", "Go, сервер фермы", "Запрашивает видеоклипы событий")
+
+Container_Boundary(edge, "ПО edge-устройства (Python)") {
+    Component(capture, "Захват видео", "OpenCV / GStreamer", "Получает кадры с камер, переподключается при обрыве")
+    Component(inference, "Анализ кадров", "Модель партнёра, ONNX Runtime", "Находит животных и их поведение на кадре")
+    Component(detector, "Детектор событий", "Python", "Проверяет правила: порог уверенности, длительность, зона. Формирует событие")
+    Component(buffer, "Видеобуфер", "Локальный диск", "Хранит видео за последние 24 ч, вырезает клип события")
+    Component(sender, "Отправитель событий", "MQTT-клиент", "Отправляет события в брокер, при обрыве складывает в локальную очередь")
+    Component(fallback, "Резервное оповещение", "HTTP-клиент", "Если брокер недоступен дольше 3 с, отправляет критичную тревогу в GSM-шлюз")
+    Component(health, "Контроль работы", "Python", "Раз в 10 с отправляет сигнал «устройство работает» и состояние камер")
+    Component(config, "Настройки", "Python", "Получает зоны и пороги из брокера, хранит локально")
+    Component(clip_api, "API клипов", "HTTP (FastAPI)", "Отдаёт клип события по запросу")
+}
+
+Rel(cameras, capture, "Видео", "RTSP")
+Rel(capture, inference, "Кадры")
+Rel(capture, buffer, "Запись видео")
+Rel(inference, detector, "Результаты анализа")
+Rel(config, detector, "Зоны и пороги")
+Rel(detector, sender, "Событие")
+Rel(sender, broker, "События", "MQTT")
+Rel(sender, fallback, "Брокер недоступен")
+Rel(fallback, gsm, "Критичная тревога", "HTTP")
+Rel(health, broker, "Сигнал «устройство работает»", "MQTT")
+Rel(broker, config, "Новые настройки", "MQTT")
+Rel(incident, clip_api, "Запрос клипа", "HTTP")
+Rel(clip_api, buffer, "Читает клип")
+
+SHOW_LEGEND()
+@enduml

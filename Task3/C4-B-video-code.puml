@@ -1,0 +1,99 @@
+@startuml C4_B_video_code
+title АгроТех Х — C4 Code — Вариант B · Сервис видеоаналитики на сервере фермы (Python)
+
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+hide empty members
+
+class Camera <<dataclass>> {
+  +camera_id: str
+  +rtsp_url: str
+  +zone_id: str
+}
+
+class CameraStream {
+  -camera: Camera
+  -last_frame_at: datetime
+  +start()
+  +stop()
+  +read_frame(): Frame
+  +is_alive(): bool
+}
+
+class CameraManager {
+  -streams: dict[str, CameraStream]
+  +load(cameras: list[Camera])
+  +restart(camera_id: str)
+  +active_streams(): list[CameraStream]
+}
+
+class BatchInference {
+  -model: PartnerModel
+  -batch_size: int
+  +analyze(frames: list[Frame]): list[Detection]
+}
+
+class Detection <<dataclass>> {
+  +camera_id: str
+  +label: str
+  +confidence: float
+  +timestamp: datetime
+}
+
+class EventDetector {
+  -rules: list[ZoneRule]
+  +process(detections: list[Detection]): list[Event]
+}
+
+class Event <<dataclass>> {
+  +event_id: UUID
+  +camera_id: str
+  +zone_id: str
+  +type: EventType
+  +confidence: float
+  +timestamp: datetime
+}
+
+class AmqpEventPublisher {
+  -channel: pika.Channel
+  -exchange: str
+  +publish(event: Event)
+}
+
+class CameraHealthMonitor {
+  -manager: CameraManager
+  -max_silence_sec: int
+  +check()
+}
+
+class AnalyticsLoop {
+  +run()
+}
+
+CameraManager *-- CameraStream
+CameraStream --> Camera
+AnalyticsLoop --> CameraManager
+AnalyticsLoop --> BatchInference
+AnalyticsLoop --> EventDetector
+AnalyticsLoop --> AmqpEventPublisher
+BatchInference ..> Detection : создаёт
+EventDetector ..> Detection
+EventDetector ..> Event : создаёт
+AmqpEventPublisher ..> Event
+CameraHealthMonitor --> CameraManager
+CameraHealthMonitor --> AmqpEventPublisher
+
+note bottom of AnalyticsLoop
+  run():
+    frames = кадры всех активных потоков
+    detections = inference.analyze(frames)
+    for event in detector.process(detections):
+        publisher.publish(event)
+end note
+
+note right of CameraHealthMonitor
+  check() раз в 5 с:
+  если камера молчит дольше max_silence_sec —
+  restart() и событие «камера не анализируется»
+end note
+@enduml
