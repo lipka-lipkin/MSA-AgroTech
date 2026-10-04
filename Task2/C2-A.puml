@@ -1,0 +1,71 @@
+@startuml C2_A
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title АгроТех Х — C4 C2 — Вариант A · Анализ видео на edge-устройствах
+
+LAYOUT_TOP_DOWN()
+
+Person(operator, "Дежурный оператор", "Получает тревоги, подтверждает их, управляет кормлением")
+Person(manager, "Руководитель / администратор", "Сводки по фермам, настройки, роли")
+
+System_Ext(cameras, "IP-камеры", "RTSP / ONVIF")
+System_Ext(equipment, "Оборудование фермы", "Кормушки, поилки, фильтры воды, датчики запасов")
+System_Ext(gsm, "GSM-шлюз и сирены", "SMS, звонки, световой и звуковой сигнал; работает без интернета")
+System_Ext(erp, "ERP 1С:Агро", "Существующая: остатки и расход корма")
+System_Ext(corp, "Корпоративная платформа данных", "Существующая: Kafka, DWH, BI")
+
+System_Boundary(edge, "Edge-устройства (N шт., рядом с камерами)") {
+    Container(edge_app, "ПО edge-устройства", "Python, модель партнёра", "Анализирует видео 4–8 камер, находит события, хранит короткий видеобуфер")
+}
+
+System_Boundary(farm, "Сервер фермы") {
+    Container(broker, "Брокер сообщений", "RabbitMQ + MQTT", "Принимает события от edge-устройств и оборудования, передаёт их сервисам")
+    Container(incident, "Сервис инцидентов и оповещений", "Go", "Создаёт тревоги из событий, оповещает дежурного, эскалирует")
+    Container(equip, "Сервис оборудования", "Java, Spring Boot", "Расписания кормления, команды кормушкам и поилкам через адаптеры")
+    Container(herd, "Сервис поголовья и ресурсов", "Java, Spring Boot", "Численность и здоровье животных, запасы корма, состояние фильтров")
+    Container(sync, "Сервис синхронизации", "Go", "Отправляет накопленные данные в центр и получает настройки")
+    Container(local_ui, "Локальный веб-интерфейс", "React", "Работа оператора без интернета")
+    ContainerDb(farm_db, "БД фермы", "PostgreSQL", "События, тревоги, данные сервисов")
+}
+
+System_Boundary(central, "Центральная платформа") {
+    Container(apps, "Веб- и мобильное приложение", "React, Flutter", "Интерфейс руководителя и оператора")
+    Container(gw, "API Gateway", "Nginx / Kong", "Единая точка входа, проверка токенов")
+    Container(iam, "Keycloak", "OIDC", "Пользователи, роли, вход")
+    Container(ingest, "Сервис приёма данных", "Go", "Принимает пакеты от ферм, сохраняет и публикует события")
+    Container(monitoring, "Сервис мониторинга ферм", "Java, Spring Boot", "Тревоги, поголовье, запасы и прогноз расхода по всем фермам")
+    Container(farms, "Сервис управления фермами", "Java, Spring Boot", "Фермы, устройства, настройки")
+    ContainerDb(c_db, "Центральная БД", "PostgreSQL", "Данные всех ферм")
+}
+
+Rel(cameras, edge_app, "Видео", "RTSP")
+Rel(edge_app, broker, "События", "MQTT")
+Rel(edge_app, gsm, "Тревога, если сервер фермы недоступен", "HTTP")
+Rel(broker, incident, "События", "AMQP")
+Rel(incident, gsm, "SMS, звонок, сирена", "HTTP")
+Rel(incident, operator, "Тревога в приложении", "WebSocket")
+Rel(equip, equipment, "Команды и опрос", "Modbus / OPC UA / REST")
+Rel(equip, broker, "Показания датчиков", "AMQP")
+Rel(broker, herd, "Подсчёт, показания", "AMQP")
+Rel(operator, local_ui, "Работает на ферме", "HTTPS")
+Rel(local_ui, incident, "Подтверждение тревог", "REST")
+Rel(local_ui, equip, "Кормление", "REST")
+Rel(incident, farm_db, "SQL")
+Rel(equip, farm_db, "SQL")
+Rel(herd, farm_db, "SQL")
+Rel(sync, farm_db, "Читает новые события", "SQL")
+Rel(sync, ingest, "Пакеты данных раз в 1–5 мин", "HTTPS")
+Rel(sync, farms, "Настройки фермы", "HTTPS")
+
+Rel(manager, apps, "Использует", "HTTPS")
+Rel(apps, gw, "API", "REST, WebSocket")
+Rel(apps, iam, "Вход", "OIDC")
+Rel(gw, monitoring, "REST")
+Rel(gw, farms, "REST")
+Rel(ingest, c_db, "SQL")
+Rel(monitoring, c_db, "SQL")
+Rel(ingest, corp, "События и метрики", "Kafka")
+Rel(monitoring, erp, "Остатки и расход корма", "REST / OData")
+
+SHOW_LEGEND()
+@enduml

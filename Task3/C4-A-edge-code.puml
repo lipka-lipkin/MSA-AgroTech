@@ -1,0 +1,95 @@
+@startuml C4_A_edge_code
+title АгроТех Х — C4 Code — Вариант A · Детектор и отправка событий на edge-устройстве (Python)
+
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+hide empty members
+
+class Detection <<dataclass>> {
+  +camera_id: str
+  +label: str
+  +confidence: float
+  +bbox: tuple
+  +timestamp: datetime
+}
+
+class ZoneRule <<dataclass>> {
+  +zone_id: str
+  +event_type: EventType
+  +min_confidence: float
+  +min_duration_sec: float
+}
+
+enum EventType {
+  FIGHT
+  PIGLET_CRUSHING
+  SICK_ANIMAL
+  DEAD_ANIMAL
+  ANIMAL_COUNT
+}
+
+class Event <<dataclass>> {
+  +event_id: UUID
+  +device_id: str
+  +camera_id: str
+  +zone_id: str
+  +type: EventType
+  +confidence: float
+  +timestamp: datetime
+  +is_critical(): bool
+}
+
+class EventDetector {
+  -rules: list[ZoneRule]
+  -active: dict[str, datetime]
+  +process(detections: list[Detection]): list[Event]
+  +update_rules(rules: list[ZoneRule])
+}
+
+interface EventSender {
+  +send(event: Event): bool
+}
+
+class MqttEventSender {
+  -client: mqtt.Client
+  -topic: str
+}
+
+class GsmFallbackSender {
+  -gateway_url: str
+}
+
+class LocalQueue {
+  -path: str
+  +put(event: Event)
+  +pop_all(): list[Event]
+}
+
+class SendingService {
+  -mqtt: EventSender
+  -gsm: EventSender
+  -queue: LocalQueue
+  +handle(event: Event)
+  +flush_queue()
+}
+
+EventDetector ..> Detection : получает
+EventDetector --> ZoneRule
+EventDetector ..> Event : создаёт
+ZoneRule --> EventType
+Event --> EventType
+MqttEventSender ..|> EventSender
+GsmFallbackSender ..|> EventSender
+SendingService --> EventSender
+SendingService --> LocalQueue
+SendingService ..> Event : отправляет
+EventSender ..> Event
+
+note right of SendingService
+  handle(event):
+    если mqtt.send(event) — готово
+    иначе: queue.put(event)
+           если event.is_critical(): gsm.send(event)
+  flush_queue() вызывается, когда брокер снова доступен
+end note
+@enduml
